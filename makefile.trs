@@ -1,0 +1,91 @@
+##-----------------------------------------------------------------------------
+##  Copyright (C) Siemens AG 1998  All Rights Reserved.  Confidential
+##-----------------------------------------------------------------------------
+##
+## Project: NUMARIS/4
+##    File: \n4_servers1\pkg\MrServers\MrImaging\seq\nc_2DFLASH\makefile.trs
+##  Author: Nadège Corbin
+## 
+##    Date: 2022-11-14
+##    Lang: make
+##
+## Descrip: Makefile fuer Sequenz-DLL
+##
+##-----------------------------------------------------------------------------
+
+##-----------------------------------------------------------------------------
+## Naehere Informationen zum den moeglichen Macros im Makefile siehe
+## MedMake-Dokumentation Q:/csw/MedMake/html/contents_t6.html
+##
+NOSYNGO() 
+
+##-----------------------------------------------------------------------------
+## enter local compiler flags
+##
+
+CPPFLAGS (-D_CONSOLE)
+CPPFLAGS (-DBUILD_SEQU)
+CPPFLAGS (-DSEQUENCE_CLASS)
+CPPFLAGS (-DSEQUENCE_CLASS_nc_2DFLASH)
+CPPFLAGS (-DMRPROT_DEP_OPT)
+CPPFLAGS (-DSEQ_NAMESPACE=SEQ_nc_2DFLASH)
+
+
+CPPFLAGS (-DWPT_NAMESPACE=nc_2DFLASH_WPT)
+CPPFLAGS (-DBUILD_WIPParameterTool)
+
+##-----------------------------------------------------------------------------
+## enter include paths
+##
+
+INCLPATHS (-I /n4_extsw/x86/extsw/MedCom/include)
+
+##-----------------------------------------------------------------------------
+## enter source files
+##
+
+CPPSOURCES (nc_2DFLASH)
+CPPSOURCES (nc_2DFLASH_UI)
+CPPSOURCESFROM (WIPParameterTool, ../common/WIPParameterTool)
+
+
+##-----------------------------------------------------------------------------
+## enter link libraries
+##
+
+
+MSDEV_i586_WinNT400(LDLIBS (libUILink))   
+
+# Base framework
+LDLIBS (MrTrace)
+LDLIBS (UTrace)
+LDLIBS (MrGenericDC)
+LDLIBS (MrParc)
+
+# Parameters
+LDLIBS (MrProt)
+LDLIBS (libSeqSysProp)
+LDLIBS (MeasSections)
+
+# Measurement system
+#LDLIBS (Sequence)
+LDLIBS (libMES)
+LDLIBS (MeasNucleiBase)
+LDLIBS (libSSL)
+
+# Application libraries
+LDLIBS (libSBB)
+LDLIBS (libSeqUtil)
+LDLIBS (libSeqUT)
+LDLIBS (libUICtrl)
+
+
+##-----------------------------------------------------------------------------
+## enter target name
+##
+
+LIB(nc_2DFLASH)
+
+##-----------------------------------------------------------------------------
+##  Copyright (C) Siemens AG 1998  All Rights Reserved.  Confidential
+##-----------------------------------------------------------------------------

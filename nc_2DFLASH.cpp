@@ -55,7 +55,7 @@
     #error SEQ_NAMESPACE not defined
 #endif
 
-
+#define SEQ_NAME "flls1a"
 
 //  --------------------------------------------------------------------------
 //
@@ -94,7 +94,13 @@ nc_2DFLASH::nc_2DFLASH()
             , m_sGPhasEncRew        ("sGPhasEncRew")
             , m_sGSpoil             ("m_sGSpoil")
             , m_sOscBit             ("m_sOscBit")
+			, m_lRepToMeasure		(0)
+			, m_lNbOfMeas          (1)
             , m_pUI                 (NULL)
+			, m_lNbDummies           (5)
+			, m_dBWT                (2.3)
+			, m_lPulseDur           (2000)
+			, m_WIPParamTool		(*this)
 {
     // no further instructions...
 }
@@ -126,6 +132,12 @@ NLSStatus nc_2DFLASH::initialize(SeqLim &rSeqLim)
     // Default return value
     NLS_STATUS lStatus = SEQU__NORMAL;
 
+	m_WIPParamTool.createLongParameter (lWIPPulseDur,0, rSeqLim,"RFdur", "usec", 100, 10000, 10, m_lPulseDur);
+
+	m_WIPParamTool.createDoubleParameter (dWIPPulseBWT,1, rSeqLim,"BWT", "", 0.1, 1.0, 40.0, 0.1, m_dBWT);
+
+	m_WIPParamTool.createLongParameter (lWIPDummies,2, rSeqLim,"nDummies", "", 0, 10000, 1, m_lNbDummies);
+
     //  The parameters in this group have no meaningful default value (zero or not specified in SeqLim).
 
     //                                (        min,        max)
@@ -137,18 +149,20 @@ NLSStatus nc_2DFLASH::initialize(SeqLim &rSeqLim)
     rSeqLim.setBandWidthPerPixel    (    0,   80,        900,           10,      260);
 
     //                              (        min,        max,    increment,  default)
-    rSeqLim.setFlipAngle            (       10.0,       90.0,          1.0,   15.000);
+    rSeqLim.setFlipAngle            (       1.0,       90.0,          1.0,   5.000);
 
 
     //  These parameters have default values, yet are added for convenience
 
     //                              (        min,        max,    increment,  default)
-    rSeqLim.setBaseResolution       (         64,        512,  SEQ::INC_64,      128); // INC_BASE2 also available
+	rSeqLim.setBaseResolution       (         64,        512,  SEQ::INC_16,      128); // INC_BASE2 also available
     rSeqLim.setReadoutFOV           (        100,        500,            1,      300); // mm
     rSeqLim.setPhaseFOV             (        100,        500,            1,      300); // mm
     rSeqLim.setPELines              (         32,       1024,            1,      128);
     rSeqLim.setSlices               (          1,          1,            1,        1); // Only single slice!
-    rSeqLim.setSliceThickness       (      2.000,     10.000,        0.500,    5.000); // mm
+    rSeqLim.setSliceThickness       (      0.500,     10.000,        0.500,    5.000); // mm
+
+	rSeqLim.setRepetitions			(          0,     10000,             1,			10);
 
     // --------------------------------------
     // Instantiation of the nc_2DFLASHUI class
@@ -213,6 +227,11 @@ NLSStatus nc_2DFLASH::prepare(MrProt &rMrProt, SeqLim &rSeqLim, MrProtocolData::
     int32_t lMinRequiredTE, lMinRequiredTR, lPhaseEncTotalTime;
     double dMeasureTimeUsec = 0.0;
 
+	//
+	//	Prepare WPT before using any parameters defined within it!
+	//
+	if (!m_WIPParamTool.prepare (rMrProt, rSeqLim)) return SEQU_ERROR;
+
     //  Retrieve some information about the scanner and define some convenient variables.
     //  Hardware information is stored in proxy files. The contents can be retrieved using SysProperties methods.
 
@@ -223,20 +242,26 @@ NLSStatus nc_2DFLASH::prepare(MrProt &rMrProt, SeqLim &rSeqLim, MrProtocolData::
     OnErrorReturn(rMrProt.kSpace().linesToMeasure(m_lLinesToMeasure));             // Call by non-constant reference
     m_lCenterLine  = rMrProt.kSpace().echoLine();                                  // 1/2 base resolution for symmetric PE
 
-    dMeasureTimeUsec = (double)m_lLinesToMeasure * rMrProt.tr()[0];
-    m_lLinesPerSec =  std::max<int32_t>(1,int32_t(m_lLinesToMeasure * 1000000. / dMeasureTimeUsec));
-    rSeqExpo.setRelevantReadoutsForMeasTime(m_lLinesToMeasure / m_lLinesPerSec);
+    dMeasureTimeUsec = (double)m_lLinesToMeasure * rMrProt.tr()[0] * m_lNbOfMeas;
+   
+	m_lRepToMeasure=rMrProt.repetitions();;
+	m_lNbOfMeas=m_lRepToMeasure+1;
 
+	m_lNbDummies=m_WIPParamTool.getLongValue (rMrProt, lWIPDummies);
 
     // CONFIGURE RF PULSE PROPERTIES AND PREPARE:
+	m_lPulseDur=m_WIPParamTool.getLongValue (rMrProt, lWIPPulseDur);
+	m_dBWT=m_WIPParamTool.getDoubleValue (rMrProt, dWIPPulseBWT);
+
     m_sSRF01.setTypeExcitation       ();                                           // Resets all moments to 0 in Unit test
-    m_sSRF01.setDuration             (2560);                                       // Most times are in microseconds
+    m_sSRF01.setDuration             (m_lPulseDur);                                       // Most times are in microseconds
     m_sSRF01.setFlipAngle            (rMrProt.flipAngle());                        // Sets flip angle based on UI (in degrees)
     m_sSRF01.setInitialPhase         (0);                                          // Sets B1 orientation to 0 degrees (+x) in rotating frame 
     m_sSRF01.setThickness            (rMrProt.sliceSeries().aFront().thickness()); // Sets thickness based on UI (in mm)
-    m_sSRF01.setSamples              (128);                                        // Number of complex points in waveform
-    m_sSRF01.setBandwidthTimeProduct (2.70);                                       // Only sRF_PULSE_SINC objects have the BW*t attribute
+    m_sSRF01.setSamples              (m_lPulseDur);                                        // Number of complex points in waveform
+    m_sSRF01.setBandwidthTimeProduct (m_dBWT);                                       // Only sRF_PULSE_SINC objects have the BW*t attribute
 
+	std::cout<<"pulse dur"<<m_sSRF01.getDuration()<<std::endl;
     //  The following is a common error-checking code structure for pulse sequences.
     //  The prepare (prep) method returns a boolean indicating success or failure.
     //  If the returned boolean indicates failure, then exit prepare and return the NLS error code.
@@ -311,6 +336,7 @@ NLSStatus nc_2DFLASH::prepare(MrProt &rMrProt, SeqLim &rSeqLim, MrProtocolData::
     //  the duration of the plateau. The ramp-down duration is NOT included.
     m_sGSliSel.setDuration(fSDSRoundUpGRT(m_sSRF01.getDuration() + m_sGSliSel.getRampUpTime()));
 
+	
     //  Fourth, prepare and check if the gradient is correctly prepared (slew rate and maximum amplitude not exceeded).
     if (!m_sGSliSel.prep())  return (m_sGSliSel.getNLSStatus());
     if (!m_sGSliSel.check()) return (m_sGSliSel.getNLSStatus());
@@ -346,6 +372,15 @@ NLSStatus nc_2DFLASH::prepare(MrProt &rMrProt, SeqLim &rSeqLim, MrProtocolData::
     m_sGSpoil.setMinRiseTime (m_dMinRiseTime);
     if(!m_sGSpoil.prepSymmetricTOTShortestTime(m_sGSliSel.getMomentum(0, m_sGSliSel.getDuration() - m_sSRF01.getDuration() / 2 ))) 
         return (m_sGSpoil.getNLSStatus());
+
+
+	// TRIGGER 
+	// Prepare TTL 
+	// 3 ms single trigger pulse
+	m_sTTL_Trig.setStartTime (0);
+    m_sTTL_Trig.prep (0,3000);
+
+
 
 
     //  Calculate minimum required TE by finding the time-dominant (longest) gradient of m_sGReadDeph, m_sGPhasEnc, and m_sGSliSelReph.
@@ -405,9 +440,9 @@ NLSStatus nc_2DFLASH::prepare(MrProt &rMrProt, SeqLim &rSeqLim, MrProtocolData::
     fSUSetSequenceString               ("fl", rMrProt, rSeqExpo);
 
     //  Fill export section
-    rSeqExpo.setRFInfo                (m_lLinesToMeasure * m_sSRF01.getRFInfo());        // Mandatory for SAR
-    rSeqExpo.setMeasureTimeUsec       (dMeasureTimeUsec);                                // Mandatory for SAR
-    rSeqExpo.setTotalMeasureTimeUsec  (dMeasureTimeUsec);                                // Mandatory for SAR
+    rSeqExpo.setRFInfo                ((m_lNbOfMeas*m_lLinesToMeasure + m_lNbDummies) * m_sSRF01.getRFInfo());        // Mandatory for SAR
+    rSeqExpo.setMeasureTimeUsec       (dMeasureTimeUsec + m_lNbDummies * rMrProt.tr()[0]);                                // Mandatory for SAR
+    rSeqExpo.setTotalMeasureTimeUsec  (dMeasureTimeUsec  + m_lNbDummies * rMrProt.tr()[0]);                                // Mandatory for SAR
     rSeqExpo.setMeasuredPELines       (m_lLinesToMeasure);                                 // Recommended
     rSeqExpo.setOnlineFFT             (SEQ::ONLINE_FFT_PHASE);                             // Necessary for online reconstruction
 
@@ -456,10 +491,12 @@ NLSStatus nc_2DFLASH::run(MrProt  &rMrProt, SeqLim &rSeqLim, MrProtocolData::Seq
     }
 
     int32_t lLine;
+	int32_t lRep;
+	int32_t lDum;
     int32_t lCurrKernelCalls = 0;
 
     //  Send the delay between measurements (multiple measurements not used in nc_2DFLASH).
-    OnErrorReturn(fSBBMeasRepetDelaysRun (rMrProt, rSeqLim, rSeqExpo, 0));
+    //OnErrorReturn(fSBBMeasRepetDelaysRun (rMrProt, rSeqLim, rSeqExpo, 0));
 
     //  Fill some entries of the measurement data header.
     //  These entries are constant for all lines and will not change from line to line.
@@ -472,22 +509,29 @@ NLSStatus nc_2DFLASH::run(MrProt  &rMrProt, SeqLim &rSeqLim, MrProtocolData::Seq
         mSEQTest (rMrProt, rSeqLim, rSeqExpo, RTEB_ClockInitTR, 0, 0, m_asSLC[0].getSliceIndex(), 0, 0);
     }
 
+	for (lDum = 0; lDum < m_lNbDummies; lDum++)
+    {
+		  OnErrorReturn(runKernel(rMrProt, rSeqLim, rSeqExpo, KERNEL_STEADY_STATE_DUMMY_SCAN, 0, 0, 0));
+	}
     //  Loop over lines.
     for (lLine = 0; lLine < m_lLinesToMeasure; lLine++)
     {
-        lCurrKernelCalls ++;
-        if(!(lCurrKernelCalls % m_lLinesPerSec)) m_sADC01.setRelevantForMeasTime();
+		for (lRep=0; lRep< m_lNbOfMeas; lRep ++)
+		{
 
+        lCurrKernelCalls ++;
+      
         //  Fill some entries of the measurement data header. These entries can change from line to line.
         m_sADC01.getMDH().setFirstScanInSlice(lLine == 0);                             // only true if lLine = 0 (first line)
         m_sADC01.getMDH().setLastScanInSlice (lLine == m_lLinesToMeasure - 1);         // only true if lLine = last line
-        m_sADC01.getMDH().setLastScanInConcat(lLine == m_lLinesToMeasure - 1);
-        m_sADC01.getMDH().setLastScanInMeas  (lLine == m_lLinesToMeasure - 1);
+        m_sADC01.getMDH().setLastScanInConcat(lLine == m_lLinesToMeasure - 1 );
+        m_sADC01.getMDH().setLastScanInMeas  (lLine == m_lLinesToMeasure - 1 );
 
         //  Call Kernel function
         //  If the kernel is successful, then loop again; otherwise, exit run method immediately and return error code
-        OnErrorReturn(runKernel(rMrProt, rSeqLim, rSeqExpo, KERNEL_IMAGE, 0, 0, lLine));
-    }
+        OnErrorReturn(runKernel(rMrProt, rSeqLim, rSeqExpo, KERNEL_IMAGE, 0, lRep, lLine));
+    } 
+	}
 
     //  Finish the sequence test.
 
@@ -503,7 +547,7 @@ NLSStatus nc_2DFLASH::run(MrProt  &rMrProt, SeqLim &rSeqLim, MrProtocolData::Seq
 //   Play out primary event block
 //. -------------------------------------------------------------------------
 NLS_STATUS nc_2DFLASH::runKernel(MrProt &rMrProt, SeqLim &rSeqLim,  MrProtocolData::SeqExpo &rSeqExpo,
-                                long lKernelMode, long /* m_lSlice */, long /* m_lPartition */, long lLine)
+                                long lKernelMode, long /* m_lSlice */, long lRep, long lLine)
 {
     static const char *ptModule = {"nc_2DFLASH::runKernel"};
     NLS_STATUS lStatus  = SEQU__NORMAL;
@@ -514,6 +558,7 @@ NLS_STATUS nc_2DFLASH::runKernel(MrProt &rMrProt, SeqLim &rSeqLim,  MrProtocolDa
 
     //  Fill measurement data header. These entries also can change from line to line
     m_sADC01.getMDH().setClin   ((unsigned short) lLine);
+	m_sADC01.getMDH().setCrep   ((unsigned short) lRep);
     m_sADC01.getMDH().setPhaseFT(lLine == m_lLinesToMeasure - 1);
 
     //  Prepare FrequencyPhase objects of the RF pulse.
@@ -537,6 +582,12 @@ NLS_STATUS nc_2DFLASH::runKernel(MrProt &rMrProt, SeqLim &rSeqLim,  MrProtocolDa
 
     //  Initialize real time event block with rotation matrix from slice
     fRTEBInit(m_asSLC[0].getROT_MATRIX());
+	
+	if (lKernelMode != KERNEL_STEADY_STATE_DUMMY_SCAN)
+	{
+		m_sTTL_Trig.run(0);  // Play trigger
+	}
+
     // - **************************************** S E Q U E N C E   T I M I N G ******************************************
     // - *           Start Time    |    NCO    |   SRF   |   ADC   |            Gradient Events            |   Sync
     // - *             (usec)      |   Event   |  Event  |  Event  |    phase   |   read     |    slice    |   Event
@@ -559,11 +610,14 @@ NLS_STATUS nc_2DFLASH::runKernel(MrProt &rMrProt, SeqLim &rSeqLim,  MrProtocolDa
     //  Play the readout gradient at its start time calculated above as a function of TE.
     fRTEI(m_sGradRO.getStartTime()  ,          0,      0,         0,            0,   &m_sGradRO,            0,         0);
 
+	if (lKernelMode != KERNEL_STEADY_STATE_DUMMY_SCAN)
+	{
     //  Turn on the ADC to measure the signal. Just as for the RF pulse, a frequency/phase object must accompany
     //  the ADC at its beginning and its end.
     fRTEI(m_sADC01.getStartTime()   ,&m_sADC01zSet,    0, &m_sADC01,            0,            0,            0,         0);
     fRTEI(m_sADC01.getStartTime() 
         + m_sADC01.getRoundedDuration(),&m_sADC01zNeg, 0,         0,            0,            0,            0,         0);
+	}
 
     //  Play the phase encoding rewinder and the spoiler gradients.
     fRTEI(m_sGradRO.getStartTime()

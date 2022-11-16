@@ -50,6 +50,11 @@
 #include "MrCommon/MrGlobalDefinitions/MrResult.h"                 // Messages
 #include "MrServers/MrMeasSrv/SeqIF/Sequence/sequmsg.h"            // Messages
 
+// for WIPParameter tools
+#include "MrServers/MrImaging/seq/common/WIPParameterTool/WIPParameterTool.h"
+
+
+
 #ifdef WIN32
 #include "TCHAR.h"
 #endif
@@ -74,6 +79,14 @@ namespace SEQ_NAMESPACE
 {
     // forward declaration
     class nc_2DFLASHUI;
+
+	enum WIPParameterPositions
+	{
+	lWIPPulseDur = 0,
+	dWIPPulseBWT = 1,
+	lWIPDummies = 2,
+	
+	};
 
     /**
     * @brief The nc_2DFLASH sequence class is intended as a demo implementation for teaching purposes. 
@@ -256,6 +269,17 @@ namespace SEQ_NAMESPACE
         // * ---------------------------------------------------------------------- *
         int32_t m_lLinesToMeasure;
 
+		
+        // * ---------------------------------------------------------------------- *
+        // * Number of Rep and Measurements (NbOfMeas=NbRep+1)                               *
+        // * ---------------------------------------------------------------------- *
+		int32_t m_lNbOfMeas;
+		int32_t m_lRepToMeasure;
+
+        // * ---------------------------------------------------------------------- *
+        // * Trigger                                                            *
+        // * ---------------------------------------------------------------------- *
+		sSYNC_EXTTRIGGER m_sTTL_Trig;
 
         // * ---------------------------------------------------------------------- *
         // * Slice position information (rotation matrices and shifts)              *
@@ -297,6 +321,18 @@ namespace SEQ_NAMESPACE
 
         sSYNC_OSC        m_sOscBit;         // Synchronization event for oscilloscope trigger
 
+		
+        // * ---------------------------------------------------------------------- *
+        // * Pulse parameters                                                   *
+        // * ---------------------------------------------------------------------- *
+
+        long m_lPulseDur;
+		double m_dBWT;
+
+		// * ---------------------------------------------------------------------- *
+        // * Dummy scans                                           *
+        // * ---------------------------------------------------------------------- *
+		long m_lNbDummies;
         //  --------------------------------------------------------------
         /// \brief <b> UI class for nc_2DFLASH
         ///
@@ -330,13 +366,15 @@ namespace SEQ_NAMESPACE
         //  ------------------------------------------------------------------
         template< class TYPE > void UnusedArg (TYPE Argument) const { if( false ) { TYPE Dummy; Dummy = Argument; } };
 
+		
+		WPT_NAMESPACE::WIPParameterTool m_WIPParamTool;
+
     private:
 
         // * ------------------------------------------------------------------ *
         // * Copy constructor not implemented                                   *
         // * ------------------------------------------------------------------ *
         nc_2DFLASH (const nc_2DFLASH &right);
-
 
 
         // * ------------------------------------------------------------------ *
